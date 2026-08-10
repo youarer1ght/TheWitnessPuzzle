@@ -1,5 +1,7 @@
 # The Witness 谜题助手
 
+> 🚀 **[在线体验](https://youarer1ght.github.io/TheWitnessPuzzle/)** — 无需下载，直接在浏览器中使用
+>
 > 一个交互式 Web 工具，帮助理解和解决《The Witness》游戏中的画线谜题。
 >
 > 规则参考：[《The Witness》设计研究笔记](https://zhuanlan.zhihu.com/p/444254269) 及游戏 Wiki。
