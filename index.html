@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Witness 谜题助手</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="app-header">
+        <div>
+            <h1>⬡ The Witness 谜题助手</h1>
+            <span class="subtitle">交互式画线谜题求解工具</span>
+        </div>
+    </header>
+
+    <!-- Main Layout -->
+    <div class="app-main">
+        <!-- Left Panel: Puzzle Selection & Edit Tools -->
+        <aside class="panel-left">
+            <!-- Puzzle Selection -->
+            <div class="panel-section">
+                <h3>📚 预设谜题</h3>
+                <select id="puzzle-select"></select>
+            </div>
+
+            <!-- Board Size -->
+            <div class="panel-section">
+                <h3>📐 棋盘大小</h3>
+                <div class="size-controls">
+                    <label>行:</label>
+                    <button class="btn-sm" id="btn-rows-down">−</button>
+                    <span class="size-value" id="rows-display">4</span>
+                    <button class="btn-sm" id="btn-rows-up">+</button>
+                </div>
+                <div class="size-controls">
+                    <label>列:</label>
+                    <button class="btn-sm" id="btn-cols-down">−</button>
+                    <span class="size-value" id="cols-display">4</span>
+                    <button class="btn-sm" id="btn-cols-up">+</button>
+                </div>
+            </div>
+
+            <!-- Symmetry Options -->
+            <div class="panel-section">
+                <h3>🪞 对称设置</h3>
+                <select id="symmetry-select" style="width:100%; padding:4px; background:#2a2a4a; color:#e0e0e0; border:1px solid #555; border-radius:4px; font-size:13px;">
+                    <option value="none">无对称</option>
+                    <option value="horizontal">水平对称 (左右镜像)</option>
+                    <option value="vertical">垂直对称 (上下镜像)</option>
+                    <option value="diagonal">对角线对称</option>
+                </select>
+            </div>
+
+            <!-- Edit Tools -->
+            <div class="panel-section">
+                <h3>🛠 编辑工具</h3>
+                <div class="edit-tools">
+                    <button class="btn-edit" id="btn-edit-start" draggable="true" data-edit-mode="start" title="在节点上放置起点（可拖拽）">🟢 起点(节点)</button>
+                    <button class="btn-edit" id="btn-edit-end" draggable="true" data-edit-mode="end" title="在节点上放置终点（可拖拽）">🔴 终点(节点)</button>
+                    <button class="btn-edit" id="btn-edit-edge-start" draggable="true" data-edit-mode="edge_start" title="在边缘中点放置起点（可拖拽）">🟢 起点(边缘)</button>
+                    <button class="btn-edit" id="btn-edit-edge-end" draggable="true" data-edit-mode="edge_end" title="在边缘中点放置终点（可拖拽）">🔴 终点(边缘)</button>
+                    <button class="btn-edit" id="btn-edit-hexagon" draggable="true" data-edit-mode="hexagon" title="在节点上放置六边形（可拖拽）">⬡ 六边形</button>
+                    <button class="btn-edit" id="btn-edit-square" draggable="true" data-edit-mode="square" title="在格子中放置方块（可拖拽）">⬛ 方块</button>
+                    <button class="btn-edit" id="btn-edit-star" draggable="true" data-edit-mode="star" title="在格子中放置星形（可拖拽）">★ 星形</button>
+                    <button class="btn-edit" id="btn-edit-triangle" draggable="true" data-edit-mode="triangle" title="在格子中放置三角形（可拖拽）">▲ 三角形</button>
+                    <button class="btn-edit" id="btn-edit-elimination" draggable="true" data-edit-mode="elimination" title="放置消除标记（可拖拽）">⌘ 消除</button>
+                    <button class="btn-edit" id="btn-edit-tetris" draggable="true" data-edit-mode="tetris" title="放置俄罗斯方块（可拖拽）">🧩 方块</button>
+                    <button class="btn-edit" id="btn-edit-blocked" draggable="true" data-edit-mode="blocked" title="设置/取消网格隔断（可拖拽）">⊘ 隔断</button>
+                </div>
+
+                <div id="tetris-shape-panel" style="display:none; margin-top:8px;">
+                    <div style="margin-bottom:4px; font-size:13px; color:#ffd700;">🧩 俄罗斯方块设置</div>
+                    <div style="margin-bottom:6px;">
+                        <label style="font-size:12px; color:#aaa;">形状:</label>
+                        <select id="tetris-shape-select" style="width:100%; padding:4px; background:#2a2a4a; color:#e0e0e0; border:1px solid #555; border-radius:4px; font-size:12px;">
+                        </select>
+                    </div>
+                    <div style="margin-bottom:4px;">
+                        <label style="font-size:12px; color:#aaa; display:flex; align-items:center; gap:6px;">
+                            <input type="checkbox" id="tetris-tilted-check" style="accent-color:#ffd700;">
+                            倾斜 (可旋转)
+                        </label>
+                    </div>
+                    <div style="margin-bottom:4px;">
+                        <label style="font-size:12px; color:#aaa; display:flex; align-items:center; gap:6px;">
+                            <input type="checkbox" id="tetris-hollow-check" style="accent-color:#4da6ff;">
+                            空心 (减法 / 蓝色)
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Shared Color Selector (for squares & stars) -->
+                <div id="color-panel" style="display:none; margin-top:8px;">
+                    <div style="margin-bottom:4px; font-size:13px; color:#ffd700;">🎨 颜色</div>
+                    <select id="color-select" style="width:100%; padding:4px; background:#2a2a4a; color:#e0e0e0; border:1px solid #555; border-radius:4px; font-size:12px;">
+                        <option value="black" style="background:#2a2a4a;color:#e0e0e0;">⬛ 黑色 (Black)</option>
+                        <option value="white" style="background:#2a2a4a;color:#e0e0e0;">⬜ 白色 (White)</option>
+                        <option value="#ff6348" style="background:#2a2a4a;color:#ff6348;">● 橙红 (Orange)</option>
+                        <option value="#ff8c00" style="background:#2a2a4a;color:#ff8c00;">● 橙色 (Dark Orange)</option>
+                        <option value="#ff69b4" style="background:#2a2a4a;color:#ff69b4;">● 粉红 (Pink)</option>
+                        <option value="#ab47bc" style="background:#2a2a4a;color:#ab47bc;">● 紫色 (Purple)</option>
+                        <option value="#42a5f5" style="background:#2a2a4a;color:#42a5f5;">● 蓝色 (Blue)</option>
+                        <option value="#26c6da" style="background:#2a2a4a;color:#26c6da;">● 青色 (Cyan)</option>
+                        <option value="#66bb6a" style="background:#2a2a4a;color:#66bb6a;">● 绿色 (Green)</option>
+                        <option value="#ffee58" style="background:#2a2a4a;color:#ffee58;">● 黄色 (Yellow)</option>
+                    </select>
+                </div>
+
+            </div>
+
+            <!-- Keyboard Hints -->
+            <div class="keyboard-hints">
+                <h3>⌨ 快捷键</h3>
+                <div class="hint"><span>左键点击节点</span><kbd>画线</kbd></div>
+                <div class="hint"><span>右键 / Backspace</span><kbd>撤销</kbd></div>
+                <div class="hint"><span>拖拽符号至回收区</span><kbd>删除</kbd></div>
+                <div class="hint"><span>Ctrl+S</span><kbd>自动求解</kbd></div>
+            </div>
+        </aside>
+
+        <!-- Center: Puzzle Board -->
+        <main class="panel-center">
+            <div class="canvas-container">
+                <canvas id="puzzle-canvas"></canvas>
+            </div>
+            <div id="recycle-bin" class="recycle-bin" title="拖拽符号到此处删除">🗑️</div>
+        </main>
+
+        <!-- Right Panel: Controls & Status -->
+        <aside class="panel-right">
+            <!-- Puzzle Info -->
+            <div class="puzzle-info">
+                <h3>📋 当前谜题</h3>
+                <div id="puzzle-name">入门教程</div>
+                <div id="puzzle-desc">从起点画线到终点</div>
+                <div id="puzzle-info">3×3 网格</div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="action-buttons">
+                <button class="btn btn-solve" id="btn-solve">🤖 自动求解</button>
+                <button class="btn btn-demo" id="btn-show-solution">▶ 演示答案</button>
+                <div id="solution-nav" style="display:flex;align-items:center;gap:4px;margin-top:4px;">
+                    <button class="btn btn-secondary" id="btn-prev-solution" disabled style="font-size:0.85em;padding:4px 8px;">◀ 上一个</button>
+                    <span id="solution-counter" style="display:none;font-size:0.85em;color:#aaa;min-width:60px;text-align:center;">解 1 / 1</span>
+                    <button class="btn btn-secondary" id="btn-next-solution" disabled style="font-size:0.85em;padding:4px 8px;">下一个 ▶</button>
+                </div>
+                <button class="btn btn-secondary" id="btn-undo">↩ 撤销一步</button>
+                <button class="btn btn-secondary" id="btn-clear-path">↺ 清除路径</button>
+                <button class="btn btn-warning" id="btn-reset">⚠ 全部重置</button>
+                <button class="btn btn-export" id="btn-export-debug">📋 导出调试信息</button>
+                <button class="btn btn-copy-feedback" id="btn-copy-feedback">📋 复制反馈信息</button>
+            </div>
+
+            <!-- Feedback Report Panel -->
+            <div id="feedback-report" class="feedback-report" style="display:none;">
+                <div class="feedback-report-header">
+                    <span>📊 分析报告</span>
+                    <button id="btn-close-report" class="btn-close-report">✕</button>
+                </div>
+                <pre id="feedback-report-content"></pre>
+            </div>
+
+            <!-- Status -->
+            <div class="status-display">
+                <h3>📊 状态</h3>
+                <div id="status-text" class="status-drawing">⏳ 等待操作...</div>
+                <ul id="error-list"></ul>
+            </div>
+        </aside>
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/board.js"></script>
+    <script src="js/symbols.js"></script>
+    <script src="js/path.js"></script>
+    <script src="js/validator.js"></script>
+    <script src="js/solver.js"></script>
+    <script src="js/analysis.js"></script>
+    <script src="js/debug.js"></script>
+    <script src="js/tetris-shapes.js"></script>
+    <script src="js/puzzles.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>

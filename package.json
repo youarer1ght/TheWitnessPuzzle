@@ -1,0 +1,22 @@
+{
+  "name": "the-witness-puzzle-helper",
+  "version": "1.0.0",
+  "description": "The Witness谜题助手 - 交互式画线谜题求解工具",
+  "private": true,
+  "scripts": {
+    "test": "node test_edge_midpoint.js"
+  },
+  "keywords": [
+    "the-witness",
+    "puzzle",
+    "solver"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "playwright": "^1.62.1"
+  },
+  "dependencies": {
+    "puppeteer": "^25.5.0"
+  }
+}
