@@ -745,10 +745,20 @@ class WitnessApp {
     }
 
     setupUIControls() {
-        // Puzzle selection
+        // Puzzle selection — grouped by category
         const puzzleSelect = document.getElementById('puzzle-select');
-        puzzleSelect.innerHTML = PUZZLE_LIBRARY.map((p, i) =>
-            `<option value="${i}">${p.name}</option>`
+        const groups = {};
+        for (let i = 0; i < PUZZLE_LIBRARY.length; i++) {
+            const cat = PUZZLE_LIBRARY[i].category || '其他';
+            if (!groups[cat]) groups[cat] = [];
+            groups[cat].push({index: i, puzzle: PUZZLE_LIBRARY[i]});
+        }
+        puzzleSelect.innerHTML = Object.entries(groups).map(([cat, items]) =>
+            `<optgroup label="${cat}">` +
+            items.map(({index, puzzle}) =>
+                `<option value="${index}">${puzzle.name}</option>`
+            ).join('') +
+            `</optgroup>`
         ).join('');
         puzzleSelect.addEventListener('change', (e) => {
             this.loadPuzzle(PUZZLE_LIBRARY[e.target.value]);
@@ -1091,6 +1101,11 @@ class WitnessApp {
         this.currentPuzzle = puzzle;
         loadPuzzle(this.board, puzzle);
         this.board.cellSize = Math.max(50, Math.min(80, 400 / Math.max(puzzle.rows, puzzle.cols)));
+        // Sync symmetry selector with puzzle's symmetry setting
+        const symmetrySelect = document.getElementById('symmetry-select');
+        if (symmetrySelect) {
+            symmetrySelect.value = puzzle.symmetry || 'none';
+        }
         this.pathController.clear();
         this.showSolution = false;
         this.solutionPath = null;
@@ -1102,12 +1117,16 @@ class WitnessApp {
         // Update info
         document.getElementById('puzzle-name').textContent = puzzle.name;
         document.getElementById('puzzle-desc').textContent = puzzle.description;
-        document.getElementById('puzzle-info').textContent =
-            `${puzzle.rows}×${puzzle.cols} 网格 | ` +
-            `${(puzzle.hexagons || []).length}六边形 ` +
-            `${(puzzle.squares || []).length}方块 ` +
-            `${(puzzle.stars || []).length}星形 ` +
-            `${(puzzle.tetris || []).length}俄罗斯方块`;
+        const parts = [`${puzzle.rows}×${puzzle.cols} 网格`];
+        if ((puzzle.hexagons || []).length) parts.push(`${puzzle.hexagons.length}六边形`);
+        if ((puzzle.squares || []).length) parts.push(`${puzzle.squares.length}方块`);
+        if ((puzzle.stars || []).length) parts.push(`${puzzle.stars.length}星形`);
+        if ((puzzle.tetris || []).length) parts.push(`${puzzle.tetris.length}俄罗斯方块`);
+        if ((puzzle.triangles || []).length) parts.push(`${puzzle.triangles.length}三角形`);
+        if ((puzzle.eliminations || []).length) parts.push(`${puzzle.eliminations.length}消除`);
+        if ((puzzle.blockedEdges || []).length) parts.push(`${puzzle.blockedEdges.length}隔断`);
+        if (puzzle.symmetry && puzzle.symmetry !== 'none') parts.push('对称');
+        document.getElementById('puzzle-info').textContent = parts.join(' | ');
 
         // Update size display
         document.getElementById('rows-display').textContent = puzzle.rows;
