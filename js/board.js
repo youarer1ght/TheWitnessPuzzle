@@ -408,8 +408,20 @@ class Board {
     // Returns {r, c, dir} or null if no edge is close enough
     pixelToEdge(px, py) {
         const cell = this.pixelToCell(px, py);
-        if (!cell) return null;
-        const {r, c} = cell;
+        let r, c;
+        if (cell) {
+            r = cell.r; c = cell.c;
+        } else {
+            // Clamp to the nearest in-grid cell so edge midpoints on the right
+            // or bottom border still resolve (floor() would otherwise land on
+            // the out-of-bounds last column/row). Points beyond the border grid
+            // are ignored.
+            const cx = Math.floor((px - this.padding) / this.cellSize);
+            const cy = Math.floor((py - this.padding) / this.cellSize);
+            if (cx < 0 || cy < 0 || cx > this.cols || cy > this.rows) return null;
+            r = Math.max(0, Math.min(this.rows - 1, cy));
+            c = Math.max(0, Math.min(this.cols - 1, cx));
+        }
         const cs = this.cellSize;
         const pad = this.padding;
         const threshold = cs * 0.4;

@@ -393,48 +393,72 @@ class WitnessApp {
         const syms = dragState.symbols;
         if (!syms || syms.length === 0) return;
 
-        // ── Validate new position and determine placement modes ──
-        const modes = []; // [{mode, sym}]
+        // ── Resolve drop target.
+        //    Node symbols (start/end/hexagon) drop onto nodes; hexagons may
+        //    ALSO drop onto edge midpoints (auto-switching to an edge hexagon).
+        //    Edge symbols drop onto edge midpoints; hexagons may ALSO drop onto
+        //    a node (auto-switching to a node hexagon). Cell symbols drop into
+        //    cells. Node detection takes priority for hexagons so a drop near a
+        //    node always becomes a node hexagon (matches handleEditClick). ──
+        const isHex = syms.some(s => s.type === 'hexagon');
+        let dropType = null; // 'node' | 'edge' | 'cell'
+        let tNode = null, tEdge = null, tCell = null;
+
         if (dragState.type === 'node') {
             const node = this.board.pixelToNode(px, py);
-            if (!node) return;
-            if (node.r === dragState.r && node.c === dragState.c) return; // no-op
-            for (const sym of syms) {
-                let mode;
-                if (sym.type === 'start') mode = 'start';
-                else if (sym.type === 'end') mode = 'end';
-                else if (sym.type === 'hexagon') mode = 'hexagon';
-                if (mode) modes.push({mode, sym});
+            if (node) {
+                if (node.r === dragState.r && node.c === dragState.c) return; // no-op
+                dropType = 'node'; tNode = node;
+            } else if (isHex) {
+                const edge = this.board.pixelToEdge(px, py);
+                if (edge) { dropType = 'edge'; tEdge = edge; }
+            }
+        } else if (dragState.type === 'edge') {
+            if (isHex) {
+                // Node drops take priority for hexagons
+                const node = this.board.pixelToNode(px, py);
+                if (node) { dropType = 'node'; tNode = node; }
+            }
+            if (!dropType) {
+                const edge = this.board.pixelToEdgeMidpoint(px, py);
+                if (edge) {
+                    if (edge.r === dragState.r && edge.c === dragState.c && edge.dir === dragState.dir) return; // no-op
+                    dropType = 'edge'; tEdge = edge;
+                }
             }
         } else if (dragState.type === 'cell') {
             const cell = this.board.pixelToCell(px, py);
-            if (!cell) return;
-            if (cell.r === dragState.r && cell.c === dragState.c) return;
-            for (const sym of syms) {
-                let mode;
+            if (cell) {
+                if (cell.r === dragState.r && cell.c === dragState.c) return; // no-op
+                dropType = 'cell'; tCell = cell;
+            }
+        }
+        if (!dropType) return;
+
+        // ── Determine placement mode for each dragged symbol ──
+        const modes = []; // [{mode, sym}]
+        for (const sym of syms) {
+            let mode = null;
+            if (dropType === 'node') {
+                if (sym.type === 'start') mode = 'start';
+                else if (sym.type === 'end') mode = 'end';
+                else if (sym.type === 'hexagon') mode = 'hexagon';
+            } else if (dropType === 'edge') {
+                if (sym.type === 'start') mode = 'edge_start';
+                else if (sym.type === 'end') mode = 'edge_end';
+                else if (sym.type === 'hexagon') mode = 'edge_hexagon';
+            } else if (dropType === 'cell') {
                 if (sym.type === 'square') mode = 'square';
                 else if (sym.type === 'star') mode = 'star';
                 else if (sym.type === 'triangle') mode = 'triangle';
                 else if (sym.type === 'elimination') mode = 'elimination';
                 else if (sym.type === 'tetris') mode = 'tetris';
-                if (mode) modes.push({mode, sym});
             }
-        } else if (dragState.type === 'edge') {
-            const edge = this.board.pixelToEdgeMidpoint(px, py);
-            if (!edge) return;
-            if (edge.r === dragState.r && edge.c === dragState.c && edge.dir === dragState.dir) return;
-            for (const sym of syms) {
-                let mode;
-                if (sym.type === 'start') mode = 'edge_start';
-                else if (sym.type === 'end') mode = 'edge_end';
-                else if (sym.type === 'hexagon') mode = 'edge_hexagon';
-                if (mode) modes.push({mode, sym});
-            }
+            if (mode) modes.push({mode, sym});
         }
-
         if (modes.length === 0) return;
 
-        // ── Remove symbols from old position ──
+        // ── Remove symbols from old position (plus symmetry mirror) ──
         if (dragState.type === 'node') {
             this.board.nodeSymbols[dragState.r][dragState.c] = [];
             // Also clear mirror node if symmetry is active
@@ -462,41 +486,34 @@ class WitnessApp {
         } else if (dragState.type === 'edge') {
             this.board.removeEdgeSymbol(dragState.r, dragState.c, dragState.dir, 'start');
             this.board.removeEdgeSymbol(dragState.r, dragState.c, dragState.dir, 'end');
+            this.board.removeEdgeSymbol(dragState.r, dragState.c, dragState.dir, 'hexagon');
             // Also clear mirrored edge
             if (this.board.symmetry !== 'none') {
                 const me = this.board.getMirroredEdge(dragState.r, dragState.c, dragState.dir);
                 if (me && !(me.r === dragState.r && me.c === dragState.c && me.dir === dragState.dir)) {
                     this.board.removeEdgeSymbol(me.r, me.c, me.dir, 'start');
                     this.board.removeEdgeSymbol(me.r, me.c, me.dir, 'end');
+                    this.board.removeEdgeSymbol(me.r, me.c, me.dir, 'hexagon');
                 }
             }
         }
 
         // ── Place at new position, preserving all properties ──
         for (const {mode, sym} of modes) {
-            if (dragState.type === 'node') {
-                const node = this.board.pixelToNode(px, py);
-                if (node) {
-                    this.board.addNodeSymbol(node.r, node.c, {...sym});
-                    if (this.board.symmetry !== 'none') {
-                        this._mirrorPlacement(node.r, node.c, 'node', sym.type);
-                    }
+            if (dropType === 'node') {
+                this.board.addNodeSymbol(tNode.r, tNode.c, {...sym});
+                if (this.board.symmetry !== 'none') {
+                    this._mirrorPlacement(tNode.r, tNode.c, 'node', sym.type);
                 }
-            } else if (dragState.type === 'cell') {
-                const cell = this.board.pixelToCell(px, py);
-                if (cell) {
-                    this.board.addCellSymbol(cell.r, cell.c, {...sym});
-                    if (this.board.symmetry !== 'none') {
-                        this._mirrorPlacement(cell.r, cell.c, 'cell', sym.type, null, sym);
-                    }
+            } else if (dropType === 'edge') {
+                this.board.addEdgeSymbol(tEdge.r, tEdge.c, tEdge.dir, {...sym});
+                if (this.board.symmetry !== 'none') {
+                    this._mirrorPlacement(tEdge.r, tEdge.c, 'edge', sym.type, tEdge.dir);
                 }
-            } else if (dragState.type === 'edge') {
-                const edge = this.board.pixelToEdgeMidpoint(px, py);
-                if (edge) {
-                    this.board.addEdgeSymbol(edge.r, edge.c, edge.dir, {...sym});
-                    if (this.board.symmetry !== 'none') {
-                        this._mirrorPlacement(edge.r, edge.c, 'edge', sym.type, edge.dir);
-                    }
+            } else if (dropType === 'cell') {
+                this.board.addCellSymbol(tCell.r, tCell.c, {...sym});
+                if (this.board.symmetry !== 'none') {
+                    this._mirrorPlacement(tCell.r, tCell.c, 'cell', sym.type, null, sym);
                 }
             }
         }
