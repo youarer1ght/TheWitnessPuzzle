@@ -394,13 +394,13 @@ class WitnessApp {
         if (!syms || syms.length === 0) return;
 
         // ── Resolve drop target.
-        //    Node symbols (start/end/hexagon) drop onto nodes; hexagons may
-        //    ALSO drop onto edge midpoints (auto-switching to an edge hexagon).
-        //    Edge symbols drop onto edge midpoints; hexagons may ALSO drop onto
-        //    a node (auto-switching to a node hexagon). Cell symbols drop into
-        //    cells. Node detection takes priority for hexagons so a drop near a
-        //    node always becomes a node hexagon (matches handleEditClick). ──
-        const isHex = syms.some(s => s.type === 'hexagon');
+        //    Node symbols (start/end/hexagon) drop onto nodes; they may ALSO
+        //    drop onto edge midpoints (auto-switching to the edge variant).
+        //    Edge symbols drop onto edge midpoints; they may ALSO drop onto a
+        //    node (auto-switching back to the node variant). Cell symbols drop
+        //    into cells. Node detection takes priority so a drop near a node
+        //    always becomes a node symbol (matches handleEditClick). ──
+        const isFlexible = syms.some(s => s.type === 'start' || s.type === 'end' || s.type === 'hexagon');
         let dropType = null; // 'node' | 'edge' | 'cell'
         let tNode = null, tEdge = null, tCell = null;
 
@@ -409,13 +409,13 @@ class WitnessApp {
             if (node) {
                 if (node.r === dragState.r && node.c === dragState.c) return; // no-op
                 dropType = 'node'; tNode = node;
-            } else if (isHex) {
+            } else if (isFlexible) {
                 const edge = this.board.pixelToEdge(px, py);
                 if (edge) { dropType = 'edge'; tEdge = edge; }
             }
         } else if (dragState.type === 'edge') {
-            if (isHex) {
-                // Node drops take priority for hexagons
+            if (isFlexible) {
+                // Node drops take priority
                 const node = this.board.pixelToNode(px, py);
                 if (node) { dropType = 'node'; tNode = node; }
             }
@@ -664,30 +664,19 @@ class WitnessApp {
 
     handleEditClick(px, py, mode) {
         if (!mode) return;
-        // === Edge-midpoint placement ===
-        if (mode === 'edge_start' || mode === 'edge_end') {
-            const edge = this.board.pixelToEdgeMidpoint(px, py);
-            if (!edge) return;
-
-            if (mode === 'edge_start') {
-                this.board.addEdgeSymbol(edge.r, edge.c, edge.dir, {type: 'start'});
-                this._mirrorPlacement(edge.r, edge.c, 'edge', 'start', edge.dir);
-            } else if (mode === 'edge_end') {
-                this.board.addEdgeSymbol(edge.r, edge.c, edge.dir, {type: 'end'});
-                this._mirrorPlacement(edge.r, edge.c, 'edge', 'end', edge.dir);
-            }
-            this.pathController.reset();
-        } else if (mode === 'start' || mode === 'end') {
-            // Node-level placement
+        if (mode === 'start' || mode === 'end') {
+            // 起点/终点可放在节点（交叉点）或边缘中点——自动识别
+            const type = mode; // 'start' | 'end'
             const node = this.board.pixelToNode(px, py);
-            if (!node) return;
-
-            if (mode === 'start') {
-                this.board.addNodeSymbol(node.r, node.c, {type: 'start'});
-                this._mirrorPlacement(node.r, node.c, 'node', 'start');
-            } else if (mode === 'end') {
-                this.board.addNodeSymbol(node.r, node.c, {type: 'end'});
-                this._mirrorPlacement(node.r, node.c, 'node', 'end');
+            if (node) {
+                this.board.addNodeSymbol(node.r, node.c, {type});
+                this._mirrorPlacement(node.r, node.c, 'node', type);
+            } else {
+                const edge = this.board.pixelToEdge(px, py);
+                if (edge) {
+                    this.board.addEdgeSymbol(edge.r, edge.c, edge.dir, {type});
+                    this._mirrorPlacement(edge.r, edge.c, 'edge', type, edge.dir);
+                }
             }
             this.pathController.reset();
         } else if (mode === 'hexagon') {
@@ -818,10 +807,8 @@ class WitnessApp {
 
         // Edit mode buttons
         const editButtons = [
-            {id: 'btn-edit-start', mode: 'start', label: '起点(节点)'},
-            {id: 'btn-edit-end', mode: 'end', label: '终点(节点)'},
-            {id: 'btn-edit-edge-start', mode: 'edge_start', label: '起点(边缘)'},
-            {id: 'btn-edit-edge-end', mode: 'edge_end', label: '终点(边缘)'},
+            {id: 'btn-edit-start', mode: 'start', label: '起点'},
+            {id: 'btn-edit-end', mode: 'end', label: '终点'},
             {id: 'btn-edit-hexagon', mode: 'hexagon', label: '六边形'},
             {id: 'btn-edit-square', mode: 'square', label: '方块'},
             {id: 'btn-edit-star', mode: 'star', label: '星形'},
@@ -1329,7 +1316,18 @@ class WitnessApp {
 
     updateValidationDisplay() {
         if (this.statusLocked) return;
-        this._updateValidationDisplayImpl();
+        // Re-entrancy guard: pathController.validate() fires onValidationChanged
+        // synchronously, which re-enters this method before the outer call has
+        // finished populating _cachedValidation (e.g. a 1-node path whose start
+        // is adjacent to an edge-midpoint end marks the path complete). Without
+        // this guard the inner call re-runs validate → infinite recursion.
+        if (this._validating) return;
+        this._validating = true;
+        try {
+            this._updateValidationDisplayImpl();
+        } finally {
+            this._validating = false;
+        }
     }
 
     _updateValidationDisplayImpl() {

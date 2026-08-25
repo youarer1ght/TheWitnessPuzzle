@@ -8,7 +8,7 @@ const { chromium } = require('playwright');
 const URL = 'http://localhost:8765/index.html';
 
 async function run() {
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({ channel: 'msedge', headless: true });
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const page = await context.newPage();
 
@@ -52,9 +52,9 @@ async function run() {
         // 2. UI ELEMENTS
         // ================================================================
         section('=== 2. UI元素完整性 ===');
-        // All 13 edit buttons
+        // All 9 edit buttons (起点/终点已合并为自动识别按钮)
         const btnIds = [
-            'btn-edit-start', 'btn-edit-end', 'btn-edit-edge-start', 'btn-edit-edge-end',
+            'btn-edit-start', 'btn-edit-end',
             'btn-edit-hexagon', 'btn-edit-square',
             'btn-edit-star', 'btn-edit-triangle', 'btn-edit-elimination',
             'btn-edit-tetris', 'btn-edit-blocked'
@@ -96,40 +96,36 @@ async function run() {
         // 4. DRAG-TO-PLACE & BLOCKED EDGE TOGGLE
         // ================================================================
         section('=== 4. 拖拽放置 & 隔断切换 ===');
-        // Test drag-to-place: drag hexagon button to canvas
+        // Test drag-to-place: drag hexagon button to node (1,1)
         const hexBtn = await page.$('#btn-edit-hexagon');
         const hexBox = await hexBtn.boundingBox();
         const canvasBox = await canvas.boundingBox();
-        const targetX = canvasBox.x + canvasBox.width * 0.4;
-        const targetY = canvasBox.y + canvasBox.height * 0.4;
+        const geo4 = await page.evaluate(() => ({ pad: window.app.board.padding, cs: window.app.board.cellSize }));
+        const pad4 = geo4.pad, cs = geo4.cs;
+        const N4 = (r, c) => [canvasBox.x + pad4 + c * cs, canvasBox.y + pad4 + r * cs];
+        const node11 = N4(1, 1);
         await page.mouse.move(hexBox.x + hexBox.width / 2, hexBox.y + hexBox.height / 2);
         await page.mouse.down();
-        await page.mouse.move(targetX, targetY, { steps: 10 });
+        await page.mouse.move(node11[0], node11[1], { steps: 10 });
         await page.mouse.up();
         await page.waitForTimeout(300);
-        assert(true, '拖拽六边形按钮到画布（无报错即通过）');
+        const placedHex = await page.evaluate(() => window.app.board.nodeSymbols[1][1].some(s => s.type === 'hexagon'));
+        assert(placedHex, '拖拽六边形按钮到节点(1,1)已放置');
 
-        // Test blocked edge toggle: click near a node offset toward an edge
-        // On a 3x3 board, node (0,1) is at (pad4 + cs, pad4)
-        const pad4 = 45;
-        const cs = 65;
-        const nodeRx = canvasBox.x + pad4 + cs;
-        const nodeRy = canvasBox.y + pad4;
-        // Offset toward horizontal edge to the right
-        await page.mouse.click(nodeRx + cs * 0.35, nodeRy);
+        // Test blocked edge toggle: click near node (0,1) offset toward an edge
+        const nodeR = N4(0, 1);
+        await page.mouse.click(nodeR[0] + cs * 0.35, nodeR[1]);
         await page.waitForTimeout(300);
-        assert(true, '点击节点附近偏右区域切换隔断（无报错即通过）');
+        const blockedCount = await page.evaluate(() => window.app.board.blockedEdges.size);
+        assert(blockedCount > 0, '点击节点附近偏右区域切换隔断 (' + blockedCount + '条阻断)');
 
         // Test recycle bin exists
         const recycleBin = await page.$('#recycle-bin');
         assert(recycleBin !== null, '回收区元素存在');
 
-        // Test drag-to-delete: drag a symbol from canvas to recycle bin
-        // First, place a symbol by clicking on the canvas near center node
-        const centerNodeX = canvasBox.x + pad4 + cs;
-        const centerNodeY = canvasBox.y + pad4 + cs;
-        await page.mouse.click(centerNodeX, centerNodeY);
-        await page.waitForTimeout(200);
+        // Test drag-to-delete: drag the hexagon from (1,1) to recycle bin
+        const centerNodeX = node11[0];
+        const centerNodeY = node11[1];
         // Now drag from that position to recycle bin
         const rbBox = await recycleBin.boundingBox();
         const rbCenterX = rbBox.x + rbBox.width / 2;
@@ -178,13 +174,14 @@ async function run() {
         await page.waitForTimeout(400);
         // Draw incomplete path (only one step)
         const box6 = await canvas.boundingBox();
-        const cellSize = (box6.width - 80) / 3; // 3x3 grid, pad=40 each side
-        const pad = 40;
-        await page.mouse.click(box6.x + pad + 0.5 * cellSize, box6.y + pad + 0 * cellSize); // click start node
+        const geo6 = await page.evaluate(() => ({ pad: window.app.board.padding, cs: window.app.board.cellSize }));
+        const pad6 = geo6.pad, cs6 = geo6.cs;
+        const N6 = (r, c) => [box6.x + pad6 + c * cs6, box6.y + pad6 + r * cs6];
+        await page.mouse.click(...N6(0, 0)); // click start node
         await page.waitForTimeout(200);
-        await page.mouse.move(box6.x + pad + 1.5 * cellSize, box6.y + pad + 0 * cellSize); // move
+        await page.mouse.move(...N6(0, 1)); // move to adjacent node (auto-extension)
         await page.waitForTimeout(200);
-        await page.mouse.click(box6.x + pad + 1.5 * cellSize, box6.y + pad + 0 * cellSize); // stop tracking
+        await page.mouse.click(...N6(0, 1)); // stop tracking — path incomplete
         await page.waitForTimeout(300);
         const statusInc = await page.$eval('#status-text', el => el.textContent || '');
         assert(statusInc.includes('未完成') || statusInc.includes('画线中'),
@@ -199,7 +196,7 @@ async function run() {
         assert(status.includes('找到解答'), '路径完整性规则恢复后可求解');
 
         // 6b. Hexagon rule — verify solver visits all hexagons
-        await page.selectOption('#puzzle-select', '1'); // hexagon_1
+        await page.selectOption('#puzzle-select', '4'); // hexagon_1
         await page.waitForTimeout(400);
         await page.click('#btn-solve');
         await page.waitForTimeout(2000);
@@ -207,7 +204,7 @@ async function run() {
         assert(status.includes('找到解答'), '六边形谜题可求解');
 
         // 6c. Square separation
-        await page.selectOption('#puzzle-select', '2'); // squares_1
+        await page.selectOption('#puzzle-select', '11'); // squares_1
         await page.waitForTimeout(400);
         await page.click('#btn-solve');
         await page.waitForTimeout(5000);
@@ -217,7 +214,7 @@ async function run() {
             '方块分离谜题可求解' + (sqErrors.length ? ' [错误:' + sqErrors.join(';') + ']' : ''));
 
         // 6d. Star pairing
-        await page.selectOption('#puzzle-select', '4'); // stars_1
+        await page.selectOption('#puzzle-select', '14'); // stars_1
         await page.waitForTimeout(400);
         await page.click('#btn-solve');
         await page.waitForTimeout(5000);
@@ -227,7 +224,7 @@ async function run() {
             '星形配对谜题可求解' + (stErrors.length ? ' [错误:' + stErrors.join(';') + ']' : ''));
 
         // 6e. Tetris shapes
-        await page.selectOption('#puzzle-select', '7'); // tetris_basic
+        await page.selectOption('#puzzle-select', '17'); // tetris_basic
         await page.waitForTimeout(400);
         await page.click('#btn-solve');
         await page.waitForTimeout(5000);
@@ -237,7 +234,7 @@ async function run() {
             '俄罗斯方块谜题可求解' + (teErrors.length ? ' [错误:' + teErrors.join(';') + ']' : ''));
 
         // 6f. Tetris combo (mixed solid/hollow)
-        await page.selectOption('#puzzle-select', '11'); // tetris_combo
+        await page.selectOption('#puzzle-select', '21'); // tetris_combo
         await page.waitForTimeout(400);
         await page.click('#btn-solve');
         await page.waitForTimeout(5000);
@@ -245,7 +242,7 @@ async function run() {
         assert(status.includes('找到解答'), '俄罗斯方块组合谜题可求解');
 
         // 6g. Blocked edges
-        await page.selectOption('#puzzle-select', '6'); // l_shape (uses blocked edges)
+        await page.selectOption('#puzzle-select', '5'); // l_shape (uses blocked edges)
         await page.waitForTimeout(400);
         await page.click('#btn-solve');
         await page.waitForTimeout(2000);
@@ -264,44 +261,42 @@ async function run() {
         await page.waitForTimeout(300);
 
         const box7 = await canvas.boundingBox();
-        // For tutorial_1 (3x3): cellSize=80, pad=40
-        // Edge midpoints for 3x3 grid:
-        //   H(0,0): x=40+0.5*80=80, y=40
-        //   H(0,2): x=40+2.5*80=240, y=40
-        //   H(3,0): x=40+0.5*80=80, y=40+3*80=280
-        //   H(3,2): x=40+2.5*80=240, y=40+3*80=280
-        const emX1 = box7.x + 80;   // H(0,0)
-        const emY1 = box7.y + 40;
-        const emX2 = box7.x + 240;  // H(0,2)
-        const emY2 = box7.y + 40;
-        const emX3 = box7.x + 80;   // H(3,0)
-        const emY3 = box7.y + 280;
-        const emX4 = box7.x + 240;  // H(3,2)
-        const emY4 = box7.y + 280;
+        const geo7 = await page.evaluate(() => ({ pad: window.app.board.padding, cs: window.app.board.cellSize }));
+        const pad7 = geo7.pad, cs7 = geo7.cs;
+        const EM7 = (r, c, dir) => dir === 'H'
+            ? [box7.x + pad7 + (c + 0.5) * cs7, box7.y + pad7 + r * cs7]
+            : [box7.x + pad7 + c * cs7, box7.y + pad7 + (r + 0.5) * cs7];
+        const placeTool = async (sel, x, y) => {
+            const btn = await page.$(sel);
+            const bb = await btn.boundingBox();
+            await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2);
+            await page.mouse.down();
+            await page.mouse.move(x, y, { steps: 10 });
+            await page.mouse.up();
+            await page.waitForTimeout(250);
+        };
 
-        // Place first edge start
-        await page.click('#btn-edit-edge-start');
-        await page.waitForTimeout(200);
-        await page.mouse.click(emX1, emY1);
-        await page.waitForTimeout(200);
+        // Place two edge starts — must coexist
+        await placeTool('#btn-edit-start', ...EM7(0, 0, 'H'));
+        await placeTool('#btn-edit-start', ...EM7(0, 2, 'H'));
+        const edgeStarts = await page.evaluate(() => {
+            const b = window.app.board;
+            let n = 0;
+            for (const [k, syms] of b.edgeSymbols) for (const s of syms) if (s.type === 'start') n++;
+            return n;
+        });
+        assert(edgeStarts === 2, '两个边缘起点共存(' + edgeStarts + ')');
 
-        // Place second edge start — must NOT remove the first
-        await page.mouse.click(emX2, emY2);
-        await page.waitForTimeout(200);
-
-        // Verify both edge starts exist by placing a 3rd one (should not trigger duplicate issues)
-        await page.mouse.click(emX1, emY1); // re-place on first — should just replace
-        await page.waitForTimeout(200);
-        assert(true, '多个边缘起点可共存(无互斥删除)');
-
-        // Switch to end mode and place two edge ends
-        await page.click('#btn-edit-edge-end');
-        await page.waitForTimeout(200);
-        await page.mouse.click(emX3, emY3);
-        await page.waitForTimeout(200);
-        await page.mouse.click(emX4, emY4);
-        await page.waitForTimeout(200);
-        assert(true, '多个边缘终点可共存');
+        // Place two edge ends — must coexist
+        await placeTool('#btn-edit-end', ...EM7(3, 0, 'H'));
+        await placeTool('#btn-edit-end', ...EM7(3, 2, 'H'));
+        const edgeEnds = await page.evaluate(() => {
+            const b = window.app.board;
+            let n = 0;
+            for (const [k, syms] of b.edgeSymbols) for (const s of syms) if (s.type === 'end') n++;
+            return n;
+        });
+        assert(edgeEnds === 2, '两个边缘终点共存(' + edgeEnds + ')');
 
         // Clear any pending state
         await page.keyboard.press('Escape');
@@ -323,26 +318,28 @@ async function run() {
         // Place a node start via drag: drag btn-edit-start to canvas node (1,1)
         const startBtn = await page.$('#btn-edit-start');
         const startBox = await startBtn.boundingBox();
-        const nodeX = box7.x + 120; // node (1,1)
-        const nodeY = box7.y + 120;
+        const nodeX = box7.x + pad7 + cs7; // node (1,1)
+        const nodeY = box7.y + pad7 + cs7;
         await page.mouse.move(startBox.x + startBox.width / 2, startBox.y + startBox.height / 2);
         await page.mouse.down();
         await page.mouse.move(nodeX, nodeY, { steps: 10 });
         await page.mouse.up();
         await page.waitForTimeout(300);
-        assert(true, '拖拽起点到节点放置完成');
+        const nodeStartPlaced = await page.evaluate(() => window.app.board.nodeSymbols[1][1].some(s => s.type === 'start'));
+        assert(nodeStartPlaced, '拖拽起点到节点(1,1)放置完成');
 
-        // Place a square symbol via drag
-        const sqBtn = await page.$('#btn-edit-square-black');
+        // Place a square symbol via drag (uses shared 方块 button + color panel)
+        const sqBtn = await page.$('#btn-edit-square');
         const sqBox = await sqBtn.boundingBox();
-        const cellX = box7.x + 80; // cell (0,0) center
-        const cellY = box7.y + 80;
+        const cellX = box7.x + pad7 + 0.5 * cs7; // cell (0,0) center
+        const cellY = box7.y + pad7 + 0.5 * cs7;
         await page.mouse.move(sqBox.x + sqBox.width / 2, sqBox.y + sqBox.height / 2);
         await page.mouse.down();
         await page.mouse.move(cellX, cellY, { steps: 10 });
         await page.mouse.up();
         await page.waitForTimeout(300);
-        assert(true, '拖拽黑方块到格子放置完成');
+        const squarePlaced = await page.evaluate(() => window.app.board.cellSymbols[0][0].some(s => s.type === 'square'));
+        assert(squarePlaced, '拖拽方块到格子(0,0)放置完成');
 
         // Drag the square symbol to recycle bin to delete
         const rb = await page.$('#recycle-bin');
@@ -373,16 +370,15 @@ async function run() {
 
         // Click to start tracking
         const box9 = await canvas.boundingBox();
-        await page.mouse.click(box9.x + 40, box9.y + 40); // node (0,0)
+        const geo9 = await page.evaluate(() => ({ pad: window.app.board.padding, cs: window.app.board.cellSize }));
+        const pad9 = geo9.pad, cs9 = geo9.cs;
+        const N9 = (r, c) => [box9.x + pad9 + c * cs9, box9.y + pad9 + r * cs9];
+        await page.mouse.click(...N9(0, 0)); // node (0,0)
         await page.waitForTimeout(200);
 
         // Move through several nodes — auto-extension
         const trackMoves = [
-            [box9.x + 120, box9.y + 40],   // (0,1)
-            [box9.x + 200, box9.y + 40],   // (0,2)
-            [box9.x + 200, box9.y + 120],  // (1,2)
-            [box9.x + 200, box9.y + 200],  // (2,2)
-            [box9.x + 200, box9.y + 280],  // (3,2)
+            N9(0, 1), N9(0, 2), N9(1, 2), N9(2, 2), N9(3, 2),
         ];
         for (const [mx, my] of trackMoves) {
             await page.mouse.move(mx, my);
@@ -411,7 +407,9 @@ async function run() {
         await page.click('#btn-show-solution');
         await page.waitForTimeout(3000);
         const demoStatus = await page.$eval('#status-text', el => el.textContent || '');
-        assert(demoStatus.includes('演示'), '演示状态显示完成: "' + demoStatus + '"');
+        // 演示结束后 render() 会用完整路径状态覆盖状态栏（"谜题解开" 或 "答案演示完成"）
+        assert(demoStatus.includes('谜题解开') || demoStatus.includes('演示'),
+            '演示状态显示完成: "' + demoStatus + '"');
 
         // Undo
         await page.click('#btn-undo');
