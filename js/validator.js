@@ -19,10 +19,10 @@
  *    - 空心蓝色块：减法，从黄色形状中减去对应格子
  *    - 特殊规则：区域内空心块数量==实心块数量时，区域形状不重要
  * 6. 三角形(Triangle)：该格子的边被路径经过的次数 = 三角形数量
- * 7. 消除标记(Elimination/倒Y)：后处理步骤——取消所在区域内的恰好一个规则违规
- *    - 可取消任意类型违规（方块颜色、星形配对、俄罗斯方块、三角形边数等）
- *    - 不可取消另一个消除标记、路径起点/终点错误、对称性错误
- *    - 若区域内无违规可取消，消除标记本身报错
+ * 7. 消除标记(Elimination/倒Y)：消除所在区域内"一个条件未被满足的符号"（自身除外）
+ *    - 逐符号消除：每个消除标记只消除一个违规符号，消除后区域必须恢复合法
+ *    - 例：区域内 2黑+2白 → 消除1个仍剩黑+白混合 → 一个消除标记无法修复该区域
+ *    - 区域无违规符号可消除时，消除标记本身报错
  */
 class PuzzleValidator {
     constructor() {
@@ -230,21 +230,30 @@ class PuzzleValidator {
 
         for (let regionIdx = 0; regionIdx < regions.length; regionIdx++) {
             const region = regions[regionIdx];
-            const squareColors = new Set();
+            const colorCount = {};
+            let total = 0;
             for (const cell of region) {
                 for (const sq of squares) {
                     if (sq.r === cell.r && sq.c === cell.c) {
-                        squareColors.add(sq.symbol.color);
+                        const color = sq.symbol.color;
+                        colorCount[color] = (colorCount[color] || 0) + 1;
+                        total++;
                     }
                 }
             }
-            if (squareColors.size > 1) {
-                const colors = [...squareColors].join('、');
+            if (Object.keys(colorCount).length > 1) {
+                const maxColorCount = Math.max(...Object.values(colorCount));
+                // 消除标记按符号逐个消除：要让区域只剩单一颜色，必须消除
+                // 所有"非最多颜色"的方块（每消除一个方块即少一个违规符号）。
+                // 例：2黑+2白 → 需消除2个（1个不够，消除后仍黑+白混合）。
+                const waive = total - maxColorCount;
+                const colors = Object.keys(colorCount).join('、');
                 this.errors.push({
                     rule: 'square',
                     message: `同一区域内存在不同颜色的圆角方块: ${colors}（需分隔到不同区域）`,
                     region: region,
-                    regionIndex: regionIdx
+                    regionIndex: regionIdx,
+                    waive: waive
                 });
             }
         }
@@ -288,11 +297,16 @@ class PuzzleValidator {
                     }
                 }
                 if (total !== 2) {
+                    // 每个消除标记消除一个该色符号：
+                    // - total > 2：消除 total-2 个 → 恰好剩2个成对
+                    // - total == 1：消除唯一那颗星 → 该色无星，配对约束消失
+                    const waive = total > 2 ? total - 2 : 1;
                     this.errors.push({
                         rule: 'star',
                         message: `区域中${color}色配对符号（星形+同色方块）共${total}个（需要恰好2个）`,
                         region: region,
-                        regionIndex: regionIdx
+                        regionIndex: regionIdx,
+                        waive: waive
                     });
                 }
             }
@@ -326,69 +340,68 @@ class PuzzleValidator {
 
             if (regionBlocks.length === 0) continue;
 
-            const solidBlocks = regionBlocks.filter(t => !t.hollow);
-            const hollowBlocks = regionBlocks.filter(t => t.hollow);
-
-            const solidCount = solidBlocks.reduce((sum, b) => sum + TetrisUtils.countCells(b.shape), 0);
-            const hollowCount = hollowBlocks.reduce((sum, b) => sum + TetrisUtils.countCells(b.shape), 0);
-
-            // Hollow blocks cannot exist alone — must have solid blocks in same region
-            if (solidBlocks.length === 0) {
-                if (hollowBlocks.length > 0) {
-                    this.errors.push({
-                        rule: 'tetris',
-                        message: '区域内只有空心方块，没有实心方块进行减法运算',
-                        region: region,
-                        regionIndex: ri
-                    });
-                }
-                continue;
-            }
-            if (hollowBlocks.length > 0 && solidCount === hollowCount) {
-                // Full cancellation — region shape irrelevant
-                continue;
+            // 全抵消（实心==空心）→ 区域形状无关，任何情况都合法
+            const allSolid = regionBlocks.filter(t => !t.hollow);
+            const allHollow = regionBlocks.filter(t => t.hollow);
+            if (allHollow.length > 0) {
+                const sc = allSolid.reduce((s, b) => s + TetrisUtils.countCells(b.shape), 0);
+                const hc = allHollow.reduce((s, b) => s + TetrisUtils.countCells(b.shape), 0);
+                if (sc === hc) continue;
             }
 
-            // Hollow blocks subtract from the required region size.
-            // A 3-cell solid + 1-cell hollow → region needs only 2 cells (net).
-            // The solid shape can extend beyond the region boundary;
-            // hollow blocks cancel the extensions, changing the region outline.
-            // Ref: "空心方块会直接改变区域轮廓"
-            const requiredArea = solidCount - hollowCount;
-
-            // Area check: without hollows, region must fit the solid shape exactly.
-            // With hollows, region must fit the NET shape (solid minus hollow).
-            if (region.length !== requiredArea) {
-                if (hollowBlocks.length === 0) {
-                    this.errors.push({
-                        rule: 'tetris',
-                        message: `区域面积(${region.length}格)与方块要求(${solidCount}格)不匹配`,
-                        region: region,
-                        regionIndex: ri
-                    });
-                } else {
-                    this.errors.push({
-                        rule: 'tetris',
-                        message: `区域面积(${region.length}格)与净方块要求(${requiredArea}格)不匹配（实心${solidCount}格 - 空心${hollowCount}格）`,
-                        region: region,
-                        regionIndex: ri
-                    });
-                }
-                continue;
-            }
-
-            // Shape fitting check
-            if (solidBlocks.length > 0 && requiredArea > 0) {
-                if (!this.canFitTetrisPieces(region, solidBlocks, hollowBlocks, board.rows, board.cols)) {
-                    this.errors.push({
-                        rule: 'tetris',
-                        message: '俄罗斯方块无法拼成当前区域形状（可尝试旋转倾斜方块）',
-                        region: region,
-                        regionIndex: ri
-                    });
+            // 消除标记按符号逐个消除：找出"能保持合法"的最大方块子集，
+            // 需消除的方块数 = 总数 - 最大合法子集大小。
+            const n = regionBlocks.length;
+            let maxFit = 0;
+            for (let mask = 0; mask < (1 << n); mask++) {
+                let size = 0;
+                for (let i = 0; i < n; i++) if (mask & (1 << i)) size++;
+                if (size <= maxFit) continue; // 不可能超过当前最优
+                const subset = [];
+                for (let i = 0; i < n; i++) if (mask & (1 << i)) subset.push(regionBlocks[i]);
+                if (this._tetrisSubsetValid(subset, region, board.rows, board.cols)) {
+                    maxFit = size;
                 }
             }
+
+            if (maxFit === n) continue; // 全量方块本身合法
+
+            this.errors.push({
+                rule: 'tetris',
+                message: `俄罗斯方块无法拼成当前区域形状（需消除${n - maxFit}个方块）`,
+                region: region,
+                regionIndex: ri,
+                waive: n - maxFit
+            });
         }
+    }
+
+    /**
+     * 判断一组俄罗斯方块（子集）能否恰好填满给定区域
+     * 空子集（无方块）恒为合法——即无俄罗斯方块约束
+     */
+    _tetrisSubsetValid(subsetBlocks, region, rows, cols) {
+        const solidBlocks = subsetBlocks.filter(t => !t.hollow);
+        const hollowBlocks = subsetBlocks.filter(t => t.hollow);
+
+        if (solidBlocks.length === 0) {
+            // 无实心 → 只有空子集合法（空心不能单独存在）
+            return hollowBlocks.length === 0;
+        }
+        if (hollowBlocks.length > 0) {
+            const sc = solidBlocks.reduce((s, b) => s + TetrisUtils.countCells(b.shape), 0);
+            const hc = hollowBlocks.reduce((s, b) => s + TetrisUtils.countCells(b.shape), 0);
+            if (sc === hc) return true; // 全抵消 → 区域形状无关
+        }
+
+        const solidCount = solidBlocks.reduce((s, b) => s + TetrisUtils.countCells(b.shape), 0);
+        const hollowCount = hollowBlocks.reduce((s, b) => s + TetrisUtils.countCells(b.shape), 0);
+        const requiredArea = solidCount - hollowCount;
+        if (region.length !== requiredArea) return false;
+        if (requiredArea > 0) {
+            return this.canFitTetrisPieces(region, solidBlocks, hollowBlocks, rows, cols);
+        }
+        return true;
     }
 
 
@@ -449,24 +462,31 @@ class PuzzleValidator {
                     rule: 'triangle',
                     message: `格子(${r},${c})的三角形要求${symbol.count}条边被经过，实际${edgesTouched}条`,
                     pos: {r, c},
-                    regionIndex
+                    regionIndex,
+                    waive: 1
                 });
             }
         }
     }
 
     // ==================== Rule: Elimination (消除标记/倒Y) ====================
-    // Corrected rule: elimination mark cancels ONE rule violation in its region.
-    // Not specific to tetris — cancels ANY region-level rule violation.
+    // Corrected rule: each elimination mark eliminates ONE unsatisfied symbol
+    // in its region (excluding itself) — not a blanket region-level cancel.
     // This is a POST-PROCESSING step that runs after all other validations.
     //
-    // - 消除标记取消所在区域内的恰好一个规则违规（不限规则类型）
-    // - 可取消：方块颜色冲突、星形配对错误、俄罗斯方块不匹配、三角形边数错误
-    // - 不可取消：另一个消除标记、路径错误、对称性错误
-    // - 若区域内无违规可取消 → 消除标记本身报错
+    // - 消除标记消除所在区域内"一个条件未被满足的符号"（自身除外）
+    // - 每条区域规则错误携带 waive 代价 = 需消除多少个符号才能修复
+    // - 不可消除：另一个消除标记、路径错误、对称性错误
+    // - 若区域内无违规符号可消除 → 消除标记本身报错
 
     /**
-     * Post-processing: each elimination mark cancels one error in its region.
+     * Post-processing: each elimination mark cancels ONE specifically-failing symbol
+     * in its region. Each region-rule error carries a `waive` cost = minimum number
+     * of symbols that must be eliminated to make that rule pass:
+     *   - 方块: 总数 - 最大颜色数（消除部分方块后余下同色）
+     *   - 星形: 总数>2 ? 总数-2 : 1（消除到只剩 2 个，或消除 1 个）
+     *   - 三角形: 1（每条边数错误需消除该三角形）
+     *   - 俄罗斯方块: n - 最大合法子集大小
      * Runs after ALL other validations have collected errors.
      */
     validateElimination(board, regions) {
@@ -484,45 +504,42 @@ class PuzzleValidator {
             }
         }
 
-        // For each region with elimination marks, cancel up to N errors
         const cancelledIndices = new Set();
 
         for (const [regionIdx, elimCount] of elimPerRegion) {
-            let cancelled = 0;
-
-            // Scan errors for cancellable region-level violations
-            for (let errIdx = 0; errIdx < this.errors.length && cancelled < elimCount; errIdx++) {
+            // Collect cancellable errors in this region (each with a waive cost)
+            const cancellable = [];
+            for (let errIdx = 0; errIdx < this.errors.length; errIdx++) {
                 const err = this.errors[errIdx];
-                // Cannot cancel another elimination mark
                 if (err.rule === 'elimination') continue;
-                // Only cancel errors associated with this specific region
-                if (err.regionIndex === regionIdx) {
-                    cancelledIndices.add(errIdx);
-                    cancelled++;
+                if (err.regionIndex === regionIdx && typeof err.waive === 'number' && err.waive >= 1) {
+                    cancellable.push({errIdx, waive: err.waive});
                 }
             }
 
-            // If not enough errors were available to cancel, flag unused elimination marks
-            if (cancelled < elimCount) {
-                const unusedCount = elimCount - cancelled;
-                let remaining = unusedCount;
-                for (const elim of eliminations) {
-                    if (remaining <= 0) break;
-                    if (regions[regionIdx].some(cell => cell.r === elim.r && cell.c === elim.c)) {
-                        // Only flag if not already an error for this elimination mark
-                        const alreadyError = this.errors.some(e =>
-                            e.rule === 'elimination' && e.pos &&
-                            e.pos.r === elim.r && e.pos.c === elim.c
-                        );
-                        if (!alreadyError) {
-                            this.errors.push({
-                                rule: 'elimination',
-                                message: `消除标记(${elim.r},${elim.c})所在区域没有可取消的违规`,
-                                pos: {r: elim.r, c: elim.c},
-                                regionIndex: regionIdx
-                            });
-                            remaining--;
-                        }
+            if (cancellable.length === 0) {
+                // No cancellable violation → every mark here is unused → flags itself as error
+                this._flagUnusedEliminations(eliminations, regions, regionIdx, elimCount, cancelledIndices);
+                continue;
+            }
+
+            const totalCost = cancellable.reduce((s, e) => s + e.waive, 0);
+            if (elimCount >= totalCost) {
+                // Enough marks to fix every violation in this region
+                for (const c of cancellable) cancelledIndices.add(c.errIdx);
+                const leftover = elimCount - totalCost;
+                if (leftover > 0) {
+                    this._flagUnusedEliminations(eliminations, regions, regionIdx, leftover, cancelledIndices);
+                }
+            } else {
+                // Not enough marks → absorb the cheapest violations greedily
+                // (e.g. 2黑+2白 + 1消除 → 方块waive=2 > 1预算 → 无法修复 → 方块错误保留)
+                cancellable.sort((a, b) => a.waive - b.waive);
+                let budget = elimCount;
+                for (const c of cancellable) {
+                    if (budget >= c.waive) {
+                        cancelledIndices.add(c.errIdx);
+                        budget -= c.waive;
                     }
                 }
             }
@@ -530,5 +547,33 @@ class PuzzleValidator {
 
         // Remove cancelled errors from the list
         this.errors = this.errors.filter((_, idx) => !cancelledIndices.has(idx));
+    }
+
+    /**
+     * Flag `count` elimination marks in `regionIdx` as unused errors
+     * (区域没有可取消的违规，或消除标记超出可取消违规的代价总和)
+     */
+    _flagUnusedEliminations(eliminations, regions, regionIdx, count, cancelledIndices) {
+        let remaining = count;
+        for (const elim of eliminations) {
+            if (remaining <= 0) break;
+            if (regions[regionIdx].some(cell => cell.r === elim.r && cell.c === elim.c)) {
+                // Only flag if not already an error for this elimination mark
+                const alreadyError = this.errors.some(e =>
+                    e.rule === 'elimination' && e.pos &&
+                    e.pos.r === elim.r && e.pos.c === elim.c
+                );
+                if (!alreadyError) {
+                    this.errors.push({
+                        rule: 'elimination',
+                        message: `消除标记(${elim.r},${elim.c})所在区域没有可取消的违规`,
+                        pos: {r: elim.r, c: elim.c},
+                        regionIndex: regionIdx
+                    });
+                    remaining--;
+                }
+            }
+        }
+        void cancelledIndices;
     }
 }
