@@ -223,10 +223,14 @@ class PuzzleSolver {
      */
     bfsSolve(startCandidates, endCandidates) {
         const hexagons = this.board.findAllNodeSymbols('hexagon');
-        const hexMap = new Map(); // Map hex position to bit index
+        const hexMap = new Map(); // Map node position to bit index
         hexagons.forEach((h, i) => hexMap.set(`${h.r},${h.c}`, i));
+        // Edge-midpoint hexagons: bit set when the path traverses that edge
+        const edgeHexagons = this.board.findAllEdgeSymbols('hexagon');
+        const edgeHexMap = new Map(); // edgeKey → bit index (after node hexagons)
+        edgeHexagons.forEach((h, i) => edgeHexMap.set(this.board.getEdgeKey(h.r, h.c, h.dir), hexagons.length + i));
 
-        const totalHexMask = (1 << hexagons.length) - 1;
+        const totalHexMask = (1 << (hexagons.length + edgeHexagons.length)) - 1;
         const endSet = new Set(endCandidates.map(e => `${e.r},${e.c}`));
         const isSymmetry = this.board.symmetry !== 'none';
         const totalCols = this.board.cols;
@@ -279,6 +283,12 @@ class PuzzleSolver {
                 if (hexMap.has(nbKey)) {
                     newMask |= (1 << hexMap.get(nbKey));
                 }
+                // Edge-midpoint hexagon: mask bit set when the traversed edge is a hexagon edge
+                const edge = this.board.getEdgeBetween(state.r, state.c, nb.r, nb.c);
+                const edgeKey = this.board.getEdgeKey(edge.r, edge.c, edge.dir);
+                if (edgeHexMap.has(edgeKey)) {
+                    newMask |= (1 << edgeHexMap.get(edgeKey));
+                }
 
                 const nIdx = nodeIdx(nb.r, nb.c);
                 const newNodeMask = state.nodeMask | (1 << nIdx);
@@ -301,7 +311,7 @@ class PuzzleSolver {
                         // Only accept clean (non-dire) paths
                         if (!isDire) {
                             const pathNodes = this._reconstructPathNodes(newState);
-                            const simplified = this.removeLoops(pathNodes, hexMap);
+                            const simplified = this.removeLoops(pathNodes, hexMap, edgeHexMap);
                             if (isSymmetry) {
                                 if (this.board.isSymmetricPathValid(simplified)) {
                                     return {success: true, path: simplified};
@@ -335,8 +345,12 @@ class PuzzleSolver {
         const hexagons = this.board.findAllNodeSymbols('hexagon');
         const hexMap = new Map();
         hexagons.forEach((h, i) => hexMap.set(`${h.r},${h.c}`, i));
+        // Edge-midpoint hexagons: bit set when the path traverses that edge
+        const edgeHexagons = this.board.findAllEdgeSymbols('hexagon');
+        const edgeHexMap = new Map(); // edgeKey → bit index (after node hexagons)
+        edgeHexagons.forEach((h, i) => edgeHexMap.set(this.board.getEdgeKey(h.r, h.c, h.dir), hexagons.length + i));
 
-        const totalHexMask = (1 << hexagons.length) - 1;
+        const totalHexMask = (1 << (hexagons.length + edgeHexagons.length)) - 1;
         const endSet = new Set(endCandidates.map(e => `${e.r},${e.c}`));
         const isSymmetry = this.board.symmetry !== 'none';
         const totalCols = this.board.cols;
@@ -390,6 +404,12 @@ class PuzzleSolver {
                 if (hexMap.has(nbKey)) {
                     newMask |= (1 << hexMap.get(nbKey));
                 }
+                // Edge-midpoint hexagon: mask bit set when the traversed edge is a hexagon edge
+                const edge = this.board.getEdgeBetween(state.r, state.c, nb.r, nb.c);
+                const edgeKey = this.board.getEdgeKey(edge.r, edge.c, edge.dir);
+                if (edgeHexMap.has(edgeKey)) {
+                    newMask |= (1 << edgeHexMap.get(edgeKey));
+                }
 
                 const nIdx = nodeIdx(nb.r, nb.c);
                 const newNodeMask = state.nodeMask | (1 << nIdx);
@@ -416,7 +436,7 @@ class PuzzleSolver {
                             queue.push(newState);
                             if (isSymmetry) {
                                 const pathNodes = this._reconstructPathNodes(newState);
-                                const simplifiedPath = this.removeLoops(pathNodes, hexMap);
+                                const simplifiedPath = this.removeLoops(pathNodes, hexMap, edgeHexMap);
                                 if (this.board.isSymmetricPathValid(simplifiedPath)) {
                                     endStates.push(newState);
                                     if (endStates.length >= maxSolutions) break;
@@ -437,7 +457,7 @@ class PuzzleSolver {
         }
 
         // Reconstruct all paths
-        const paths = endStates.map(es => this.removeLoops(this._reconstructPathNodes(es), hexMap));
+        const paths = endStates.map(es => this.removeLoops(this._reconstructPathNodes(es), hexMap, edgeHexMap));
         return {
             success: paths.length > 0,
             paths,
@@ -693,8 +713,22 @@ class PuzzleSolver {
      * Remove loops from a path (duplicate node visits)
      * A→B→C→B→D becomes A→B→D
      * Uses iterative approach to avoid stack overflow
+     * Does NOT remove a loop that contains unique hexagons:
+     * - node hexagons (hexMap) whose node isn't visited elsewhere
+     * - edge-midpoint hexagons (edgeHexMap) whose edge isn't traversed elsewhere
      */
-    removeLoops(path, hexMap = null) {
+    removeLoops(path, hexMap = null, edgeHexMap = null) {
+        // Collect "r,c:dir" edge keys for a node segment
+        const edgesOf = (nodes) => {
+            const set = new Set();
+            for (let i = 0; i < nodes.length - 1; i++) {
+                const a = nodes[i], b = nodes[i + 1];
+                const e = this.board.getEdgeBetween(a.r, a.c, b.r, b.c);
+                set.add(`${e.r},${e.c}:${e.dir}`);
+            }
+            return set;
+        };
+
         let result = path;
         let changed = true;
         while (changed) {
@@ -707,13 +741,25 @@ class PuzzleSolver {
                     const loopSegment = result.slice(prevIdx, i);
                     const restPath = [...result.slice(0, prevIdx), ...result.slice(i)];
 
-                    // If hexMap provided, check that removing this loop doesn't lose
-                    // any hexagon that doesn't appear elsewhere in the path
-                    if (hexMap) {
-                        const hexInLoop = loopSegment.filter(n => hexMap.has(`${n.r},${n.c}`));
-                        const restKeySet = new Set(restPath.map(n => `${n.r},${n.c}`));
-                        const lostHexagons = hexInLoop.filter(n => !restKeySet.has(`${n.r},${n.c}`));
-                        if (lostHexagons.length > 0) {
+                    // Check that removing this loop doesn't lose any unique hexagon
+                    if (hexMap || edgeHexMap) {
+                        // Node hexagons in loop
+                        let lostHexagons = [];
+                        if (hexMap) {
+                            const hexInLoop = loopSegment.filter(n => hexMap.has(`${n.r},${n.c}`));
+                            const restKeySet = new Set(restPath.map(n => `${n.r},${n.c}`));
+                            lostHexagons = hexInLoop.filter(n => !restKeySet.has(`${n.r},${n.c}`));
+                        }
+                        // Edge hexagons in loop (edges whose traversal is unique to the loop)
+                        let lostEdgeHexes = [];
+                        if (edgeHexMap) {
+                            const loopEdges = edgesOf(loopSegment);
+                            const restEdges = edgesOf(restPath);
+                            lostEdgeHexes = [...loopEdges].filter(k =>
+                                edgeHexMap.has(k) && !restEdges.has(k)
+                            );
+                        }
+                        if (lostHexagons.length > 0 || lostEdgeHexes.length > 0) {
                             // Don't remove this loop — it contains unique hexagon(s)
                             // Update seen to point to the later occurrence
                             seen.set(key, i);

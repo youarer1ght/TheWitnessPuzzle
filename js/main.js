@@ -366,12 +366,14 @@ class WitnessApp {
         } else if (type === 'edge') {
             this.board.removeEdgeSymbol(r, c, dir, 'start');
             this.board.removeEdgeSymbol(r, c, dir, 'end');
+            this.board.removeEdgeSymbol(r, c, dir, 'hexagon');
             // Also clear mirrored edge
             if (this.board.symmetry !== 'none') {
                 const me = this.board.getMirroredEdge(r, c, dir);
                 if (me && !(me.r === r && me.c === c && me.dir === dir)) {
                     this.board.removeEdgeSymbol(me.r, me.c, me.dir, 'start');
                     this.board.removeEdgeSymbol(me.r, me.c, me.dir, 'end');
+                    this.board.removeEdgeSymbol(me.r, me.c, me.dir, 'hexagon');
                 }
             }
         }
@@ -425,6 +427,7 @@ class WitnessApp {
                 let mode;
                 if (sym.type === 'start') mode = 'edge_start';
                 else if (sym.type === 'end') mode = 'edge_end';
+                else if (sym.type === 'hexagon') mode = 'edge_hexagon';
                 if (mode) modes.push({mode, sym});
             }
         }
@@ -657,7 +660,7 @@ class WitnessApp {
                 this._mirrorPlacement(edge.r, edge.c, 'edge', 'end', edge.dir);
             }
             this.pathController.reset();
-        } else if (mode === 'start' || mode === 'end' || mode === 'hexagon') {
+        } else if (mode === 'start' || mode === 'end') {
             // Node-level placement
             const node = this.board.pixelToNode(px, py);
             if (!node) return;
@@ -668,9 +671,20 @@ class WitnessApp {
             } else if (mode === 'end') {
                 this.board.addNodeSymbol(node.r, node.c, {type: 'end'});
                 this._mirrorPlacement(node.r, node.c, 'node', 'end');
-            } else if (mode === 'hexagon') {
+            }
+            this.pathController.reset();
+        } else if (mode === 'hexagon') {
+            // 六边形可放在节点（交叉点）或边缘中点——自动识别
+            const node = this.board.pixelToNode(px, py);
+            if (node) {
                 this.board.addNodeSymbol(node.r, node.c, {type: 'hexagon', color: 'black'});
                 this._mirrorPlacement(node.r, node.c, 'node', 'hexagon');
+            } else {
+                const edge = this.board.pixelToEdge(px, py);
+                if (edge) {
+                    this.board.addEdgeSymbol(edge.r, edge.c, edge.dir, {type: 'hexagon', color: 'black'});
+                    this._mirrorPlacement(edge.r, edge.c, 'edge', 'hexagon', edge.dir);
+                }
             }
             this.pathController.reset();
         } else if (mode === 'blocked') {
@@ -1119,6 +1133,7 @@ class WitnessApp {
         document.getElementById('puzzle-desc').textContent = puzzle.description;
         const parts = [`${puzzle.rows}×${puzzle.cols} 网格`];
         if ((puzzle.hexagons || []).length) parts.push(`${puzzle.hexagons.length}六边形`);
+        if ((puzzle.edgeHexagons || []).length) parts.push(`${puzzle.edgeHexagons.length}边缘六边形`);
         if ((puzzle.squares || []).length) parts.push(`${puzzle.squares.length}方块`);
         if ((puzzle.stars || []).length) parts.push(`${puzzle.stars.length}星形`);
         if ((puzzle.tetris || []).length) parts.push(`${puzzle.tetris.length}俄罗斯方块`);

@@ -171,9 +171,12 @@ class PuzzleValidator {
     }
 
     // ==================== Rule: Hexagons ====================
-    // 规则：路径必须经过（穿过节点）每一个六边形符号
+    // 规则：路径必须经过每一个六边形符号
+    // - 节点六边形：路径必须穿过该节点
+    // - 边缘中点六边形：路径必须走过该条边（类似起点/终点可位于边缘中点）
 
     validateHexagons(board, pathController) {
+        // 节点（交叉点）六边形
         const hexagons = board.findAllNodeSymbols('hexagon');
         const pathNodes = new Set(pathController.getPathNodes().map(n => `${n.r},${n.c}`));
 
@@ -183,6 +186,19 @@ class PuzzleValidator {
                     rule: 'hexagon',
                     message: `六边形位于节点(${hex.r},${hex.c})未被路径经过`,
                     pos: {r: hex.r, c: hex.c}
+                });
+            }
+        }
+
+        // 边缘中点六边形：路径必须走过该条边
+        const edgeHexagons = board.findAllEdgeSymbols('hexagon');
+        for (const eh of edgeHexagons) {
+            const [n1, n2] = board.getEdgeNodes(eh.r, eh.c, eh.dir);
+            if (!pathController.isEdgeInAnyPath(n1.r, n1.c, n2.r, n2.c)) {
+                this.errors.push({
+                    rule: 'hexagon',
+                    message: `六边形位于边缘中点(${eh.r},${eh.c}·${eh.dir === 'H' ? '水平' : '垂直'})未被路径经过`,
+                    pos: {r: eh.r, c: eh.c}
                 });
             }
         }

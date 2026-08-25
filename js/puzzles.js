@@ -170,6 +170,65 @@ const PUZZLE_LIBRARY = [
     },
 
     // ═══════════════════════════════════════════════════════════════
+    // 边缘六边形 — 六边形也可放在边中点，路径必须走过该条边
+    // ═══════════════════════════════════════════════════════════════
+    {
+        id: 'edge_hex_basic',
+        name: '过路闸口',
+        description: '六边形不仅能在交叉点，也能位于边的中点！这个六边形在竖直边中点——路径必须恰好走过那一条边。',
+        category: '边缘六边形',
+        rows: 3,
+        cols: 3,
+        starts: [{r: 0, c: 0}],
+        ends: [{r: 3, c: 3}],
+        edgeHexagons: [
+            {r: 1, c: 2, dir: 'V'}   // 竖直边 (1,2)-(2,2) 的中点
+        ],
+        solution: [
+            {r: 0, c: 0}, {r: 0, c: 1}, {r: 0, c: 2}, {r: 1, c: 2},
+            {r: 2, c: 2}, {r: 3, c: 2}, {r: 3, c: 3}
+        ]
+    },
+    {
+        id: 'edge_hex_mix',
+        name: '点边混合',
+        description: '一个六边形在节点，一个在边中点。路径既要经过节点，也要走过那条边——两条约束同时生效。',
+        category: '边缘六边形',
+        rows: 4,
+        cols: 4,
+        starts: [{r: 0, c: 0}],
+        ends: [{r: 4, c: 4}],
+        hexagons: [
+            {r: 2, c: 2}
+        ],
+        edgeHexagons: [
+            {r: 2, c: 0, dir: 'H'},   // 水平边 (2,0)-(2,1) 的中点
+            {r: 0, c: 2, dir: 'V'}    // 竖直边 (0,2)-(1,2) 的中点
+        ],
+        solution: [
+            {r: 0, c: 0}, {r: 0, c: 1}, {r: 0, c: 2}, {r: 1, c: 2},
+            {r: 2, c: 2}, {r: 2, c: 1}, {r: 2, c: 0}, {r: 3, c: 0},
+            {r: 4, c: 0}, {r: 4, c: 1}, {r: 4, c: 2}, {r: 4, c: 3},
+            {r: 4, c: 4}
+        ]
+    },
+    {
+        id: 'edge_hex_corridor',
+        name: '夹缝通行',
+        description: '三条边中点各有一个六边形，形成一条狭窄的通道。路径必须依次穿过这三条边。',
+        category: '边缘六边形',
+        rows: 4,
+        cols: 4,
+        starts: [{r: 0, c: 1}],
+        ends: [{r: 4, c: 2}],
+        edgeHexagons: [
+            {r: 1, c: 0, dir: 'V'},   // 左边界 (1,0)-(2,0)
+            {r: 2, c: 1, dir: 'H'},   // (2,1)-(2,2)
+            {r: 2, c: 3, dir: 'V'}    // (2,3)-(3,3)
+        ]
+    },
+
+    // ═══════════════════════════════════════════════════════════════
     // 黑白方块分离 — 不同颜色的方块必须在不同区域
     // ═══════════════════════════════════════════════════════════════
     {
@@ -339,7 +398,7 @@ const PUZZLE_LIBRARY = [
     {
         id: 'tetris_t_shape',
         name: 'T形挑战 (4格)',
-        description: 'T形方块占据4格。此谜题经算法验证无解——并非所有配置都有答案。',
+        description: '两块T形方块（可旋转）各占4格，共需8格。两个区域需分别恰好容纳一块T形。',
         category: '俄罗斯方块',
         rows: 4,
         cols: 4,
@@ -731,10 +790,17 @@ function loadPuzzle(board, puzzle) {
         }
     }
 
-    // Place hexagons
+    // Place hexagons (on nodes / grid crossings)
     if (puzzle.hexagons) {
         for (const h of puzzle.hexagons) {
             board.addNodeSymbol(h.r, h.c, {type: 'hexagon', color: h.color || 'black'});
+        }
+    }
+
+    // Place edge-midpoint hexagons (path must traverse these edges)
+    if (puzzle.edgeHexagons) {
+        for (const eh of puzzle.edgeHexagons) {
+            board.addEdgeSymbol(eh.r, eh.c, eh.dir, {type: 'hexagon', color: eh.color || 'black'});
         }
     }
 
