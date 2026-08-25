@@ -52,12 +52,12 @@ async function run() {
         // 2. UI ELEMENTS
         // ================================================================
         section('=== 2. UI元素完整性 ===');
-        // All 9 edit buttons (起点/终点已合并为自动识别按钮)
+        // Edit buttons (隔断无独立按钮——直接点击边的中点切换)
         const btnIds = [
             'btn-edit-start', 'btn-edit-end',
             'btn-edit-hexagon', 'btn-edit-square',
             'btn-edit-star', 'btn-edit-triangle', 'btn-edit-elimination',
-            'btn-edit-tetris', 'btn-edit-blocked'
+            'btn-edit-tetris'
         ];
         for (const id of btnIds) {
             assert(await page.$('#' + id) !== null, '按钮#' + id);
@@ -112,12 +112,22 @@ async function run() {
         const placedHex = await page.evaluate(() => window.app.board.nodeSymbols[1][1].some(s => s.type === 'hexagon'));
         assert(placedHex, '拖拽六边形按钮到节点(1,1)已放置');
 
-        // Test blocked edge toggle: click near node (0,1) offset toward an edge
-        const nodeR = N4(0, 1);
-        await page.mouse.click(nodeR[0] + cs * 0.35, nodeR[1]);
+        // Test blocked edge toggle: click the midpoint of edge (0,1)H (between nodes)
+        const edgeMid = [canvasBox.x + pad4 + (1 + 0.5) * cs, canvasBox.y + pad4 + 0 * cs];
+        await page.mouse.click(edgeMid[0], edgeMid[1]);
         await page.waitForTimeout(300);
         const blockedCount = await page.evaluate(() => window.app.board.blockedEdges.size);
-        assert(blockedCount > 0, '点击节点附近偏右区域切换隔断 (' + blockedCount + '条阻断)');
+        assert(blockedCount > 0, '点击边(0,1)中点切换隔断 (' + blockedCount + '条阻断)');
+
+        // Click again to reconnect — barrier removed
+        await page.mouse.click(edgeMid[0], edgeMid[1]);
+        await page.waitForTimeout(300);
+        const blockedAfter = await page.evaluate(() => window.app.board.blockedEdges.size);
+        assert(blockedAfter === 0, '再次点击同一中点恢复连接（隔断取消，剩' + blockedAfter + '条）');
+
+        // Click again to re-block for later tests
+        await page.mouse.click(edgeMid[0], edgeMid[1]);
+        await page.waitForTimeout(300);
 
         // Test recycle bin exists
         const recycleBin = await page.$('#recycle-bin');

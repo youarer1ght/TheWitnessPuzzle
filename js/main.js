@@ -93,13 +93,17 @@ class WitnessApp {
                         clientX: e.clientX,
                         clientY: e.clientY
                     };
+                    // Short click on symbol = normal path click
+                    this.pathController.handleMouseDown(px, py);
                 } else {
                     this._dragCandidate = null;
-                    // No symbol: try edge-click to toggle blocked edge
-                    this._tryToggleBlockedEdge(px, py);
+                    // No symbol: clicking an edge midpoint toggles 隔断/连接；
+                    // node clicks are handled by the path controller.
+                    const toggledEdge = this._tryToggleEdgeClick(px, py);
+                    if (!toggledEdge) {
+                        this.pathController.handleMouseDown(px, py);
+                    }
                 }
-                // Always attempt path drawing (short click on symbol = normal path click)
-                this.pathController.handleMouseDown(px, py);
             } else if (e.button === 2) { // Right click
                 e.preventDefault();
                 this.pathController.undo();
@@ -530,46 +534,31 @@ class WitnessApp {
             if (typeof s === 'string') return s;
             const typeNames = {
                 start: '起点', end: '终点', hexagon: '六边形', square: '方块',
-                star: '星形', triangle: '三角形', elimination: '消除', tetris: '方块',
-                blocked: '隔断'
+                star: '星形', triangle: '三角形', elimination: '消除', tetris: '方块'
             };
             return typeNames[s.type] || s.type || '?';
         }).join(', ');
     }
 
     /**
-     * Toggle a blocked edge near the given pixel position.
-     * Detects which edge the click is near (using node-offset direction)
-     * and toggles its blocked status. Called on mousedown when no symbol is hit.
-     * In symmetry mode, also toggles the mirror edge for consistency.
+     * Direct edge-click toggle for blocked edges (隔断/连接).
+     * Clicking the midpoint of an edge toggles its blocked status;
+     * clicking again reconnects it. Returns true if an edge was toggled
+     * (caller should skip path handling). In symmetry mode the mirror edge
+     * is toggled too.
+     * While actively drawing a path, edge clicks are left to path control
+     * (click-to-stop), so drawing never creates accidental barriers.
      */
-    _tryToggleBlockedEdge(px, py) {
-        let node = this.board.pixelToNode(px, py);
-
-        // Fallback: if not near any node, try snapping to edge midpoint
-        if (!node) {
-            const edge = this.board.pixelToEdge(px, py);
-            if (edge) {
-                this._toggleEdgeWithMirror(edge.r, edge.c, edge.dir);
-                this.render();
-            }
-            return;
+    _tryToggleEdgeClick(px, py) {
+        if (this.pathController.isDrawing) return false;
+        // Near a node → it's a node/path click, not an edge click
+        if (this.board.pixelToNode(px, py)) return false;
+        const edge = this.board.pixelToEdge(px, py);
+        if (edge) {
+            this._toggleEdgeWithMirror(edge.r, edge.c, edge.dir);
+            return true;
         }
-
-        const {x: nx, y: ny} = this.board.nodeToPixel(node.r, node.c);
-        const dx = px - nx;
-        const dy = py - ny;
-        const threshold = this.board.cellSize * 0.25;
-
-        if (Math.abs(dx) > Math.abs(dy) && node.c < this.board.cols && Math.abs(dy) < threshold) {
-            // Click is closer to horizontal edge
-            this._toggleEdgeWithMirror(node.r, node.c, 'H');
-            this.render();
-        } else if (Math.abs(dy) > Math.abs(dx) && node.r < this.board.rows && Math.abs(dx) < threshold) {
-            // Click is closer to vertical edge
-            this._toggleEdgeWithMirror(node.r, node.c, 'V');
-            this.render();
-        }
+        return false;
     }
 
     /**
@@ -693,28 +682,6 @@ class WitnessApp {
                 }
             }
             this.pathController.reset();
-        } else if (mode === 'blocked') {
-            // Edge blocking - find the nearest edge (node-proximity first, then edge midpoint)
-            let node = this.board.pixelToNode(px, py);
-
-            if (!node) {
-                const edge = this.board.pixelToEdge(px, py);
-                if (edge) {
-                    this._toggleEdgeWithMirror(edge.r, edge.c, edge.dir);
-                }
-            } else {
-                // Find which direction the click is in
-                const {x: nx, y: ny} = this.board.nodeToPixel(node.r, node.c);
-                const dx = px - nx;
-                const dy = py - ny;
-                const threshold = this.board.cellSize * 0.25;
-
-                if (Math.abs(dx) > Math.abs(dy) && node.c < this.board.cols && Math.abs(dy) < threshold) {
-                    this._toggleEdgeWithMirror(node.r, node.c, 'H');
-                } else if (Math.abs(dy) > Math.abs(dx) && node.r < this.board.rows && Math.abs(dx) < threshold) {
-                    this._toggleEdgeWithMirror(node.r, node.c, 'V');
-                }
-            }
         } else {
             // Cell-level placement
             const cell = this.board.pixelToCell(px, py);
@@ -814,8 +781,7 @@ class WitnessApp {
             {id: 'btn-edit-star', mode: 'star', label: '星形'},
             {id: 'btn-edit-triangle', mode: 'triangle', label: '三角形'},
             {id: 'btn-edit-elimination', mode: 'elimination', label: '消除'},
-            {id: 'btn-edit-tetris', mode: 'tetris', label: '俄罗斯方块'},
-            {id: 'btn-edit-blocked', mode: 'blocked', label: '隔断'}
+            {id: 'btn-edit-tetris', mode: 'tetris', label: '俄罗斯方块'}
         ];
 
         // Edit buttons are drag-only (HTML5 DnD); no click handlers needed.
