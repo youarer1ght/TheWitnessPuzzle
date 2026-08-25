@@ -8,8 +8,9 @@
  * 3. 圆角方块(Square)：划线将不同颜色的方块分隔到不同的连通区域中
  *    - 同一区域内不能出现不同颜色的方块
  *    - 棋盘边界也算作"墙"
- * 4. 星形符号(Star/Sun)：同一分割区域内，与星形同色的符号恰好成对出现（2个）
- *    - 配对对象不限于星形，同色方块也可以配对
+ * 4. 星形符号(Star/Sun)：区域内存在某色星形时，该色符号（星形+同色方块）总数恰好为2
+ *    - 星形是配对的触发者；同色方块仅在与星形同区时才作配对对象
+ *    - 区域内无某色星形时，该色方块不参与配对，仅遵循颜色分离规则
  * 5. 俄罗斯方块(Tetris)：所在分割区域的形状必须与块状符号外形匹配
  *    - 水平摆放（非倾斜）：形状和角度完全相同，不可旋转
  *    - 倾斜摆放：形状相同即可，可旋转但不能翻转/镜像
@@ -248,9 +249,11 @@ class PuzzleValidator {
     }
 
     // ==================== Rule: Stars (星形符号) ====================
-    // 规则：同一分割区域内，与星形符号同色的其他符号有且只有1个（即恰好2个一组）
-    // 配对对象不限于星形——同色的方块也可以配对
-    // 每种颜色独立计数
+    // 规则：区域内存在某色星形时，该色"配对符号"（星形 + 同色圆角方块）总数必须恰好为2。
+    // - 配对对象不限于星形——同色方块可作星形的配对对象，但仅当与星形同处一个区域
+    // - 区域中没有某色星形时，该色方块不参与配对，仅遵循颜色分离规则
+    //   （例：两个紫色星形同区 + 橙色方块同区 → 橙色方块无配对约束，只做颜色分离）
+    // - 黑白方块始终不参与星形配对
 
     validateStars(board, regions) {
         const stars = board.findAllCellSymbols('star');
@@ -258,35 +261,33 @@ class PuzzleValidator {
 
         for (let regionIdx = 0; regionIdx < regions.length; regionIdx++) {
             const region = regions[regionIdx];
-            // 统计区域内每种颜色的"可配对符号"数量
-            const colorCount = {};
 
+            // 统计区域内每种颜色的星形符号数量（星形触发配对约束）
+            const starCount = {};
             for (const cell of region) {
-                // 星形符号 — 按颜色计数
                 for (const st of stars) {
                     if (st.r === cell.r && st.c === cell.c) {
                         const color = st.symbol.color || '#ff6348';
-                        colorCount[color] = (colorCount[color] || 0) + 1;
-                    }
-                }
-                // 圆角方块也可参与星形配对 — 按颜色计数
-                for (const sq of squares) {
-                    if (sq.r === cell.r && sq.c === cell.c) {
-                        const color = sq.symbol.color;
-                        // NOTE: 黑白方块主要遵循颜色分离规则，不参与星形配对
-                        if (color !== 'black' && color !== 'white') {
-                            colorCount[color] = (colorCount[color] || 0) + 1;
-                        }
+                        starCount[color] = (starCount[color] || 0) + 1;
                     }
                 }
             }
 
-            // 每种颜色的符号数量必须是0或2（恰好成对）
-            for (const [color, count] of Object.entries(colorCount)) {
-                if (count !== 0 && count !== 2) {
+            // 仅对"区域内存在星形"的颜色施加配对约束
+            for (const [color, sc] of Object.entries(starCount)) {
+                let total = sc;
+                // 同色圆角方块在星形所在区域内可作为配对对象
+                for (const cell of region) {
+                    for (const sq of squares) {
+                        if (sq.r === cell.r && sq.c === cell.c && sq.symbol.color === color) {
+                            total++;
+                        }
+                    }
+                }
+                if (total !== 2) {
                     this.errors.push({
                         rule: 'star',
-                        message: `区域中${color}色符号有${count}个（需要恰好2个成对，或0个）`,
+                        message: `区域中${color}色配对符号（星形+同色方块）共${total}个（需要恰好2个）`,
                         region: region,
                         regionIndex: regionIdx
                     });
